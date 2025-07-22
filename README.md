@@ -34,7 +34,7 @@ A comprehensive audit log monitoring and alerting system for Atlassian organizat
 
 Create a `.env.local` file:
 
-```env
+\`\`\`env
 # Atlassian API Configuration
 ATLASSIAN_API_KEY=your_api_key_here
 ATLASSIAN_ORG_ID=your_org_id_here
@@ -57,25 +57,25 @@ SIEM_API_KEY=your_siem_api_key
 # Application Configuration
 NEXTAUTH_SECRET=your_nextauth_secret_here
 NEXTAUTH_URL=http://localhost:3000
-```
+\`\`\`
 
 ### 3. Database Setup
 
 Run the database initialization script:
 
-```bash
+\`\`\`bash
 # For PostgreSQL
 psql -d audit_stream -f scripts/create-audit-tables.sql
 
 # For MySQL
 mysql -u username -p audit_stream < scripts/create-audit-tables.sql
-```
+\`\`\`
 
 ### 4. Development Server
 
-```
+\`\`\`
 npm run dev
-```
+\`\`\`
 
 Visit `http://localhost:3000` to access the dashboard.
 
@@ -90,30 +90,30 @@ Visit `http://localhost:3000` to access the dashboard.
 #### Steps
 
 1. **Deploy to Vercel**
-```
+\`\`\`
 npm install -g vercel
 vercel
-```
+\`\`\`
 
 2. **Configure Environment Variables in Vercel**
-```
+\`\`\`
 vercel env add ATLASSIAN_API_KEY
 vercel env add ATLASSIAN_ORG_ID
 vercel env add DATABASE_URL
 # Add other environment variables as needed
-```
+\`\`\`
 
 3. **Set up Database**
-```
+\`\`\`
 # If using Neon (recommended)
 npm install @neondatabase/serverless
 # Run the SQL script in your Neon console or via CLI
-```
+\`\`\`
 
 4. **Deploy**
-```
+\`\`\`
 vercel --prod
-```
+\`\`\`
 
 ### Option 2: Docker Deployment
 
@@ -124,7 +124,7 @@ vercel --prod
 #### Steps
 
 1. **Create docker-compose.yml**
-```yaml
+\`\`\`yaml
 version: '3.8'
 services:
   app:
@@ -152,10 +152,10 @@ services:
 
 volumes:
   postgres_data:
-```
+\`\`\`
 
 2. **Create Dockerfile**
-```dockerfile
+\`\`\`dockerfile
 FROM node:18-alpine
 
 WORKDIR /app
@@ -169,12 +169,12 @@ RUN npm run build
 EXPOSE 3000
 
 CMD ["npm", "start"]
-```
+\`\`\`
 
 3. **Deploy**
-```bash
+\`\`\`bash
 docker-compose up -d
-```
+\`\`\`
 
 ### Option 3: AWS Deployment
 
@@ -186,7 +186,7 @@ docker-compose up -d
 #### Steps
 
 1. **Create RDS Database**
-```bash
+\`\`\`bash
 aws rds create-db-instance \
   --db-instance-identifier audit-stream-db \
   --db-instance-class db.t3.micro \
@@ -194,10 +194,10 @@ aws rds create-db-instance \
   --master-username admin \
   --master-user-password YourPassword123 \
   --allocated-storage 20
-```
+\`\`\`
 
 2. **Deploy with AWS App Runner**
-```bash
+\`\`\`bash
 # Create apprunner.yaml
 version: 1.0
 runtime: nodejs18
@@ -217,10 +217,10 @@ run:
       value: ${ATLASSIAN_API_KEY}
     - name: DATABASE_URL
       value: ${DATABASE_URL}
-```
+\`\`\`
 
 3. **Create App Runner Service**
-```bash
+\`\`\`bash
 aws apprunner create-service \
   --service-name audit-stream \
   --source-configuration '{
@@ -231,7 +231,7 @@ aws apprunner create-service \
       }
     }
   }'
-```
+\`\`\`
 
 ### Option 4: Self-Hosted Server
 
@@ -242,7 +242,7 @@ aws apprunner create-service \
 #### Steps
 
 1. **Server Setup**
-```bash
+\`\`\`bash
 # Update system
 sudo apt update && sudo apt upgrade -y
 
@@ -258,16 +258,16 @@ sudo apt install nginx
 
 # Install PM2 for process management
 sudo npm install -g pm2
-```
+\`\`\`
 
 2. **Database Setup**
-```bash
+\`\`\`bash
 sudo -u postgres createdb audit_stream
 sudo -u postgres psql -d audit_stream -f scripts/create-audit-tables.sql
-```
+\`\`\`
 
 3. **Application Setup**
-````bash
+\`\`\``bash
 # Clone repository
 git clone <repository-url> /var/www/audit-stream
 cd /var/www/audit-stream
@@ -298,10 +298,10 @@ EOF
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup
-```
+\`\`\`
 
 4. **Nginx Configuration**
-````bash
+\`\`\``bash
 sudo tee /etc/nginx/sites-available/audit-stream << EOF
 server {
     listen 80;
@@ -324,13 +324,13 @@ EOF
 sudo ln -s /etc/nginx/sites-available/audit-stream /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl restart nginx
-```
+\`\`\`
 
 5. **SSL Certificate (Optional)**
-```bash
+\`\`\`bash
 sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d your-domain.com
-```
+\`\`\`
 
 ## Configuration
 
@@ -383,7 +383,7 @@ Logs are written to:
 
 Regular database backups are recommended:
 
-```bash
+\`\`\`bash
 # PostgreSQL backup
 pg_dump audit_stream > backup_$(date +%Y%m%d_%H%M%S).sql
 
@@ -398,7 +398,7 @@ EOF
 
 chmod +x backup.sh
 # Add to crontab: 0 2 * * * /path/to/backup.sh
-```
+\`\`\`
 
 ### Performance Optimization
 
@@ -419,10 +419,10 @@ chmod +x backup.sh
 ### Common Issues
 
 1. **Database Connection Errors**
-   ```bash
+   \`\`\`bash
    # Check database connectivity
    psql $DATABASE_URL -c "SELECT 1;"
-  ```
+  \`\`\`
 
 2. **Atlassian API Rate Limits**
    - Monitor rate limit headers
@@ -437,10 +437,10 @@ chmod +x backup.sh
 ### Debug Mode
 
 Enable debug logging:
-```env
+\`\`\`env
 DEBUG=audit-stream:*
 LOG_LEVEL=debug
-```
+\`\`\`
 
 ## Security Considerations
 
