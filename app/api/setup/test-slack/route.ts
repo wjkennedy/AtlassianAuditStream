@@ -8,12 +8,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Webhook URL is required" }, { status: 400 })
     }
 
-    // Test Slack webhook
+    // Test Slack webhook with a simple message
     const testMessage = {
       text: "🧪 Test message from Atlassian Audit Stream",
       channel: channel || "#general",
       username: "Audit Stream Bot",
       icon_emoji: ":shield:",
+      attachments: [
+        {
+          color: "good",
+          fields: [
+            {
+              title: "Status",
+              value: "Connection test successful",
+              short: true,
+            },
+            {
+              title: "Timestamp",
+              value: new Date().toISOString(),
+              short: true,
+            },
+          ],
+        },
+      ],
     }
 
     const response = await fetch(webhookUrl, {
@@ -27,13 +44,13 @@ export async function POST(request: NextRequest) {
     if (response.ok) {
       return NextResponse.json({
         success: true,
-        message: "Test message sent successfully to Slack",
+        message: "Test message sent to Slack successfully",
       })
     } else {
       const errorText = await response.text()
       return NextResponse.json({
         success: false,
-        error: `Slack webhook failed: ${response.status} - ${errorText}`,
+        error: `Slack webhook error: ${response.status} - ${errorText}`,
       })
     }
   } catch (error) {
