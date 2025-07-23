@@ -10,6 +10,7 @@ import { AuditEventsList } from "@/components/audit-events-list"
 import { AlertsConfig } from "@/components/alerts-config"
 import { FilterPanel } from "@/components/filter-panel"
 import { MetricsDashboard } from "@/components/metrics-dashboard"
+import { SetupPanel } from "@/components/setup-panel"
 
 interface AuditEvent {
   id: string
@@ -62,6 +63,7 @@ export default function AuditStreamDashboard() {
   })
   const [alertsEnabled, setAlertsEnabled] = useState(false)
   const [criticalEvents, setCriticalEvents] = useState<AuditEvent[]>([])
+  const [showSetup, setShowSetup] = useState(false)
 
   // Mock data for demonstration
   const mockEvents: AuditEvent[] = [
@@ -199,6 +201,10 @@ export default function AuditStreamDashboard() {
             ) : (
               <Button onClick={startPolling}>Start Polling</Button>
             )}
+            <Button onClick={() => setShowSetup(!showSetup)} variant="outline">
+              <Settings className="w-4 h-4 mr-2" />
+              Setup
+            </Button>
           </div>
         </div>
 
@@ -248,6 +254,15 @@ export default function AuditStreamDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {showSetup && (
+          <SetupPanel
+            onConfigSave={(config) => {
+              console.log("Configuration saved:", config)
+              setShowSetup(false)
+            }}
+          />
+        )}
 
         {/* Main Content */}
         <Tabs defaultValue="events" className="space-y-6">
