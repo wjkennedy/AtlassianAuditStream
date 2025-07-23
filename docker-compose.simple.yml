@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # Option 1: Minimal stack with just the app and SQLite
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - ATLASSIAN_API_KEY=${ATLASSIAN_API_KEY}
+      - ATLASSIAN_ORG_ID=${ATLASSIAN_ORG_ID}
+      - DATABASE_URL=file:./data/audit.db
+      # No Redis needed - use in-memory caching
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Option 2: Add PostgreSQL only (no Redis)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: audit_stream
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: audit-stream-network

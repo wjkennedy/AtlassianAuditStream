@@ -5,23 +5,34 @@ export async function POST(request: NextRequest) {
     const { endpoint, apiKey } = await request.json()
 
     if (!endpoint || !apiKey) {
-      return NextResponse.json({ success: false, error: "SIEM endpoint and API key are required" }, { status: 400 })
+      return NextResponse.json(
+        {
+          success: false,
+          error: "SIEM endpoint and API key are required",
+        },
+        { status: 400 },
+      )
     }
 
     // Test SIEM endpoint with a sample event
     const testEvent = {
       timestamp: new Date().toISOString(),
       source: "atlassian-audit-stream",
-      event_type: "test",
-      message: "Test connection from Atlassian Audit Stream",
+      event_type: "connection_test",
       severity: "info",
+      message: "SIEM connection test from Atlassian Audit Stream",
+      metadata: {
+        test: true,
+        version: "1.0.0",
+      },
     }
 
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "X-API-Key": apiKey, // Some SIEMs use this header instead
       },
       body: JSON.stringify(testEvent),
     })
@@ -29,13 +40,13 @@ export async function POST(request: NextRequest) {
     if (response.ok) {
       return NextResponse.json({
         success: true,
-        message: "SIEM connection successful",
+        message: "Test event sent to SIEM successfully",
       })
     } else {
       const errorText = await response.text()
       return NextResponse.json({
         success: false,
-        error: `SIEM API Error: ${response.status} - ${errorText}`,
+        error: `SIEM endpoint error: ${response.status} - ${errorText}`,
       })
     }
   } catch (error) {

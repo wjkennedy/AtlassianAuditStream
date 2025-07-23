@@ -4,15 +4,22 @@ export async function POST(request: NextRequest) {
   try {
     const { url, email, apiToken, project } = await request.json()
 
-    if (!url || !email || !apiToken || !project) {
-      return NextResponse.json({ success: false, error: "All Jira fields are required" }, { status: 400 })
+    if (!url || !email || !apiToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Jira URL, email, and API token are required",
+        },
+        { status: 400 },
+      )
     }
 
-    // Test Jira API connection by getting project info
-    const testUrl = `${url}/rest/api/3/project/${project}`
+    // Test Jira connection by getting user info
+    const testUrl = `${url}/rest/api/3/myself`
     const auth = Buffer.from(`${email}:${apiToken}`).toString("base64")
 
     const response = await fetch(testUrl, {
+      method: "GET",
       headers: {
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
@@ -20,21 +27,38 @@ export async function POST(request: NextRequest) {
     })
 
     if (response.ok) {
-      const projectData = await response.json()
+      const userData = await response.json()
+
+      // If project is specified, test access to it
+      if (project) {
+        const projectUrl = `${url}/rest/api/3/project/${project}`
+        const projectResponse = await fetch(projectUrl, {
+          method: "GET",
+          headers: {
+            Authorization: `Basic ${auth}`,
+            Accept: "application/json",
+          },
+        })
+
+        if (!projectResponse.ok) {
+          return NextResponse.json({
+            success: false,
+            error: `Cannot access project '${project}'. Check project key and permissions.`,
+          })
+        }
+      }
+
       return NextResponse.json({
         success: true,
-        message: "Jira connection successful",
-        projectInfo: {
-          key: projectData.key,
-          name: projectData.name,
-          projectTypeKey: projectData.projectTypeKey,
-        },
+        message: "Successfully connected to Jira",
+        user: userData.displayName,
+        accountId: userData.accountId,
       })
     } else {
       const errorText = await response.text()
       return NextResponse.json({
         success: false,
-        error: `Jira API Error: ${response.status} - ${errorText}`,
+        error: `Jira API error: ${response.status} - ${errorText}`,
       })
     }
   } catch (error) {
