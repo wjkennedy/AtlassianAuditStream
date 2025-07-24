@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# SSL Setup script for Audit Stream application with Let's Encrypt
+# SSL Setup Script for Atlassian Audit Stream
+# This script sets up Let's Encrypt SSL certificates
+
 set -e
 
 # Colors for output
@@ -9,121 +11,115 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+# Function to print colored output
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
 }
 
-warn() {
-    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-error() {
-    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if .env.local exists
+if [ ! -f ".env.local" ]; then
+    print_error ".env.local file not found. Please copy .env.example to .env.local and configure it."
     exit 1
-}
-
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   error "This script should not be run as root"
-fi
-
-# Check required commands
-command -v docker >/dev/null 2>&1 || error "Docker is required but not installed"
-command -v docker-compose >/dev/null 2>&1 || error "Docker Compose is required but not installed"
-
-# Check environment file
-if [[ ! -f .env.local ]]; then
-    error ".env.local file not found. Please create it with required environment variables."
 fi
 
 # Source environment variables
-set -a
 source .env.local
-set +a
 
-# Validate SSL-specific environment variables
-if [[ -z "$DOMAIN_NAME" ]]; then
-    error "DOMAIN_NAME environment variable is required for SSL setup"
+# Validate required environment variables
+if [ -z "$DOMAIN_NAME" ]; then
+    print_error "DOMAIN_NAME is not set in .env.local"
+    exit 1
 fi
 
-if [[ -z "$SSL_EMAIL" ]]; then
-    error "SSL_EMAIL environment variable is required for Let's Encrypt"
+if [ -z "$SSL_EMAIL" ]; then
+    print_error "SSL_EMAIL is not set in .env.local"
+    exit 1
 fi
 
-log "Setting up SSL certificates for domain: $DOMAIN_NAME"
+print_status "Setting up SSL for domain: $DOMAIN_NAME"
+print_status "SSL email: $SSL_EMAIL"
 
 # Create necessary directories
-mkdir -p ./ssl
-mkdir -p ./logs
+mkdir -p certbot/conf
+mkdir -p certbot/www
 
-# Start nginx first to handle the challenge
-log "Starting nginx for Let's Encrypt challenge..."
+# Check if certificates already exist
+if [ -d "certbot/conf/live/$DOMAIN_NAME" ]; then
+    print_warning "SSL certificates already exist for $DOMAIN_NAME"
+    read -p "Do you want to renew them? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        print_status "Skipping certificate generation"
+        SKIP_CERT=true
+    fi
+fi
+
+# Start nginx temporarily for certificate validation
+print_status "Starting temporary nginx for certificate validation..."
 docker-compose -f docker-compose.ssl.yml up -d nginx
 
 # Wait for nginx to be ready
-sleep 10
+sleep 5
 
-# Get SSL certificate
-log "Requesting SSL certificate from Let's Encrypt..."
-docker-compose -f docker-compose.ssl.yml run --rm certbot
-
-# Check if certificate was created
-if docker-compose -f docker-compose.ssl.yml exec nginx test -f /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem; then
-    log "SSL certificate successfully obtained!"
-else
-    error "Failed to obtain SSL certificate"
+# Generate SSL certificates if needed
+if [ "$SKIP_CERT" != "true" ]; then
+    print_status "Requesting SSL certificate from Let's Encrypt..."
+    
+    docker-compose -f docker-compose.ssl.yml run --rm certbot \
+        certonly --webroot \
+        --webroot-path=/var/www/certbot \
+        --email $SSL_EMAIL \
+        --agree-tos \
+        --no-eff-email \
+        -d $DOMAIN_NAME
+    
+    if [ $? -eq 0 ]; then
+        print_status "SSL certificate obtained successfully!"
+    else
+        print_error "Failed to obtain SSL certificate"
+        docker-compose -f docker-compose.ssl.yml down
+        exit 1
+    fi
 fi
 
-# Restart nginx with SSL configuration
-log "Restarting nginx with SSL configuration..."
-docker-compose -f docker-compose.ssl.yml restart nginx
+# Stop temporary containers
+docker-compose -f docker-compose.ssl.yml down
 
-# Start all services
-log "Starting all services with SSL..."
+# Start the full application with SSL
+print_status "Starting application with SSL..."
 docker-compose -f docker-compose.ssl.yml up -d
 
-# Wait for services to be healthy
-log "Waiting for services to be ready..."
-timeout=300
-counter=0
+# Wait for services to be ready
+print_status "Waiting for services to start..."
+sleep 10
 
-while ! curl -k -f https://$DOMAIN_NAME/api/health >/dev/null 2>&1; do
-    if [[ $counter -ge $timeout ]]; then
-        error "Services failed to start within $timeout seconds"
-    fi
-    sleep 5
-    counter=$((counter + 5))
-    echo -n "."
-done
-
-echo ""
-log "Services are healthy and SSL is working!"
-
-# Set up certificate renewal
-log "Setting up automatic certificate renewal..."
-cat > /tmp/renew-cert.sh << EOF
-#!/bin/bash
-cd $(pwd)
-docker-compose -f docker-compose.ssl.yml run --rm certbot renew
-docker-compose -f docker-compose.ssl.yml restart nginx
-EOF
-
-chmod +x /tmp/renew-cert.sh
-sudo mv /tmp/renew-cert.sh /etc/cron.monthly/renew-audit-stream-cert
-
-log "SSL setup completed successfully!"
-log "Application is available at: https://$DOMAIN_NAME"
-log "Certificate will be automatically renewed monthly"
-
-# Display service status
-echo ""
-log "Service Status:"
-docker-compose -f docker-compose.ssl.yml ps
-
-# Test SSL
-log "Testing SSL configuration..."
-if curl -I https://$DOMAIN_NAME >/dev/null 2>&1; then
-    log "SSL test passed!"
+# Test SSL configuration
+print_status "Testing SSL configuration..."
+if curl -f -s -I https://$DOMAIN_NAME > /dev/null; then
+    print_status "SSL is working correctly!"
+    print_status "Your application is now available at: https://$DOMAIN_NAME"
 else
-    warn "SSL test failed - please check the configuration"
+    print_warning "SSL test failed. Please check the logs:"
+    print_warning "docker-compose -f docker-compose.ssl.yml logs nginx"
 fi
+
+# Set up automatic certificate renewal
+print_status "Setting up automatic certificate renewal..."
+(crontab -l 2>/dev/null; echo "0 12 * * * cd $(pwd) && docker-compose -f docker-compose.ssl.yml exec certbot certbot renew --quiet && docker-compose -f docker-compose.ssl.yml exec nginx nginx -s reload") | crontab -
+
+print_status "Setup complete!"
+print_status "Your Atlassian Audit Stream is now running with SSL at: https://$DOMAIN_NAME"
+print_status ""
+print_status "Useful commands:"
+print_status "  View logs: docker-compose -f docker-compose.ssl.yml logs -f"
+print_status "  Stop services: docker-compose -f docker-compose.ssl.yml down"
+print_status "  Restart services: docker-compose -f docker-compose.ssl.yml restart"
+print_status "  Renew certificates: docker-compose -f docker-compose.ssl.yml exec certbot certbot renew"

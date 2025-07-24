@@ -3,88 +3,60 @@ version: '3.8'
 services:
   app:
     build: .
+    container_name: atlassian-audit-app
     environment:
       - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
       - ATLASSIAN_API_KEY=${ATLASSIAN_API_KEY}
-      - ATLASSIAN_ORG_ID=${ATLASSIAN_ORG_ID}
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/audit_stream
+      - ATLASSIAN_BASE_URL=${ATLASSIAN_BASE_URL}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
-      - JIRA_URL=${JIRA_URL}
-      - JIRA_EMAIL=${JIRA_EMAIL}
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
-      - SIEM_ENDPOINT=${SIEM_ENDPOINT}
-      - SIEM_API_KEY=${SIEM_API_KEY}
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-      - NEXTAUTH_URL=https://${DOMAIN_NAME}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
+      - JIRA_BASE_URL=${JIRA_BASE_URL}
+      - SIEM_WEBHOOK_URL=${SIEM_WEBHOOK_URL}
+      - STORAGE_TYPE=${STORAGE_TYPE:-simple}
     volumes:
-      - ./logs:/app/logs
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=audit_stream
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./scripts/create-audit-tables.sql:/docker-entrypoint-initdb.d/01-init.sql
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+      - audit_data:/app/data
+    networks:
+      - audit_network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   nginx:
     image: nginx:alpine
+    container_name: atlassian-audit-nginx
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx-ssl.conf:/etc/nginx/nginx.conf.template
-      - ./ssl:/etc/nginx/ssl
-      - certbot-etc:/etc/letsencrypt
-      - certbot-var:/var/lib/letsencrypt
-      - web-root:/var/www/certbot
+      - ./nginx-ssl.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
     environment:
       - DOMAIN_NAME=${DOMAIN_NAME}
-    command: /bin/sh -c "envsubst '$$DOMAIN_NAME' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
     depends_on:
       - app
+    networks:
+      - audit_network
     restart: unless-stopped
+    command: /bin/sh -c "envsubst '$$DOMAIN_NAME' < /etc/nginx/nginx.conf > /tmp/nginx.conf && nginx -g 'daemon off;'"
 
   certbot:
     image: certbot/certbot
+    container_name: atlassian-audit-certbot
     volumes:
-      - certbot-etc:/etc/letsencrypt
-      - certbot-var:/var/lib/letsencrypt
-      - web-root:/var/www/certbot
-    depends_on:
-      - nginx
-    command: certonly --webroot --webroot-path=/var/www/certbot --email ${SSL_EMAIL} --agree-tos --no-eff-email --force-renewal -d ${DOMAIN_NAME}
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
-  redis_data:
-  certbot-etc:
-  certbot-var:
-  web-root:
+  audit_data:
+    driver: local
+
+networks:
+  audit_network:
+    driver: bridge
