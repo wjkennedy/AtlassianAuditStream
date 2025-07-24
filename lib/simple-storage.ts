@@ -1,210 +1,264 @@
-// Simplified storage layer that can use SQLite, PostgreSQL, or in-memory
-import type { AuditEvent, AlertRule, AlertChannel } from "./audit-processor"
+import fs from "fs/promises"
+import path from "path"
 
-interface StorageAdapter {
-  // Events
-  saveEvents(events: AuditEvent[]): Promise<void>
-  getEvents(filters?: any): Promise<AuditEvent[]>
-
-  // Alert Rules
-  saveAlertRule(rule: AlertRule): Promise<AlertRule>
-  getAlertRules(): Promise<AlertRule[]>
-  deleteAlertRule(id: number): Promise<void>
-
-  // Alert Channels
-  saveAlertChannel(channel: AlertChannel): Promise<AlertChannel>
-  getAlertChannels(): Promise<AlertChannel[]>
-  deleteAlertChannel(id: number): Promise<void>
-
-  // Configuration
-  saveConfig(key: string, value: any): Promise<void>
-  getConfig(key: string): Promise<any>
+interface StorageItem {
+  id: string
+  data: any
+  timestamp: number
+  expires?: number
 }
 
-// In-memory storage (simplest option)
-class MemoryStorage implements StorageAdapter {
-  private events: AuditEvent[] = []
-  private alertRules: AlertRule[] = []
-  private alertChannels: AlertChannel[] = []
-  private config: Map<string, any> = new Map()
+class SimpleStorage {
+  private dataDir: string
+  private memoryCache = new Map<string, StorageItem>()
 
-  async saveEvents(events: AuditEvent[]): Promise<void> {
-    this.events.push(...events)
-    // Keep only last 10,000 events to prevent memory issues
-    if (this.events.length > 10000) {
-      this.events = this.events.slice(-10000)
+  constructor(dataDir = process.env.FILE_STORAGE_PATH || "./data") {
+    this.dataDir = dataDir
+    this.ensureDataDir()
+  }
+
+  private async ensureDataDir(): Promise<void> {
+    try {
+      await fs.mkdir(this.dataDir, { recursive: true })
+    } catch (error) {
+      console.error("Failed to create data directory:", error)
     }
   }
 
-  async getEvents(filters?: any): Promise<AuditEvent[]> {
-    let filteredEvents = [...this.events]
+  private getFilePath(collection: string, id: string): string {
+    return path.join(this.dataDir, `${collection}_${id}.json`)
+  }
 
-    if (filters?.from) {
-      const fromDate = new Date(filters.from)
-      filteredEvents = filteredEvents.filter((e) => new Date(e.attributes.time) >= fromDate)
+  private getCollectionPath(collection: string): string {
+    return path.join(this.dataDir, `${collection}_index.json`)
+  }
+
+  async save(collection: string, id: string, data: any, ttlSeconds?: number): Promise<void> {
+    const item: StorageItem = {
+      id,
+      data,
+      timestamp: Date.now(),
+      expires: ttlSeconds ? Date.now() + ttlSeconds * 1000 : undefined,
     }
 
-    if (filters?.to) {
-      const toDate = new Date(filters.to)
-      filteredEvents = filteredEvents.filter((e) => new Date(e.attributes.time) <= toDate)
+    // Save to memory cache
+    this.memoryCache.set(`${collection}:${id}`, item)
+
+    // Save to file
+    try {
+      const filePath = this.getFilePath(collection, id)
+      await fs.writeFile(filePath, JSON.stringify(item, null, 2))
+
+      // Update collection index
+      await this.updateCollectionIndex(collection, id)
+    } catch (error) {
+      console.error(`Failed to save ${collection}:${id}:`, error)
+    }
+  }
+
+  async load(collection: string, id: string): Promise<any | null> {
+    const cacheKey = `${collection}:${id}`
+
+    // Check memory cache first
+    const cached = this.memoryCache.get(cacheKey)
+    if (cached) {
+      if (cached.expires && Date.now() > cached.expires) {
+        this.memoryCache.delete(cacheKey)
+        await this.delete(collection, id)
+        return null
+      }
+      return cached.data
     }
 
-    if (filters?.action) {
-      filteredEvents = filteredEvents.filter((e) => e.attributes.action.includes(filters.action))
+    // Load from file
+    try {
+      const filePath = this.getFilePath(collection, id)
+      const content = await fs.readFile(filePath, "utf-8")
+      const item: StorageItem = JSON.parse(content)
+
+      // Check expiration
+      if (item.expires && Date.now() > item.expires) {
+        await this.delete(collection, id)
+        return null
+      }
+
+      // Cache in memory
+      this.memoryCache.set(cacheKey, item)
+      return item.data
+    } catch (error) {
+      return null
+    }
+  }
+
+  async delete(collection: string, id: string): Promise<boolean> {
+    const cacheKey = `${collection}:${id}`
+
+    // Remove from memory cache
+    this.memoryCache.delete(cacheKey)
+
+    // Remove file
+    try {
+      const filePath = this.getFilePath(collection, id)
+      await fs.unlink(filePath)
+
+      // Update collection index
+      await this.removeFromCollectionIndex(collection, id)
+      return true
+    } catch (error) {
+      return false
+    }
+  }
+
+  async list(collection: string): Promise<string[]> {
+    try {
+      const indexPath = this.getCollectionPath(collection)
+      const content = await fs.readFile(indexPath, "utf-8")
+      return JSON.parse(content)
+    } catch (error) {
+      return []
+    }
+  }
+
+  async clear(collection: string): Promise<void> {
+    const items = await this.list(collection)
+
+    for (const id of items) {
+      await this.delete(collection, id)
     }
 
-    return filteredEvents.slice(0, filters?.limit || 100)
-  }
-
-  async saveAlertRule(rule: AlertRule): Promise<AlertRule> {
-    const existingIndex = this.alertRules.findIndex((r) => r.id === rule.id)
-    if (existingIndex >= 0) {
-      this.alertRules[existingIndex] = rule
-    } else {
-      rule.id = Date.now() // Simple ID generation
-      this.alertRules.push(rule)
+    // Clear collection index
+    try {
+      const indexPath = this.getCollectionPath(collection)
+      await fs.writeFile(indexPath, JSON.stringify([]))
+    } catch (error) {
+      console.error(`Failed to clear collection ${collection}:`, error)
     }
-    return rule
   }
 
-  async getAlertRules(): Promise<AlertRule[]> {
-    return [...this.alertRules]
-  }
+  private async updateCollectionIndex(collection: string, id: string): Promise<void> {
+    try {
+      const indexPath = this.getCollectionPath(collection)
+      let index: string[] = []
 
-  async deleteAlertRule(id: number): Promise<void> {
-    this.alertRules = this.alertRules.filter((r) => r.id !== id)
-  }
+      try {
+        const content = await fs.readFile(indexPath, "utf-8")
+        index = JSON.parse(content)
+      } catch (error) {
+        // Index doesn't exist, start with empty array
+      }
 
-  async saveAlertChannel(channel: AlertChannel): Promise<AlertChannel> {
-    const existingIndex = this.alertChannels.findIndex((c) => c.id === channel.id)
-    if (existingIndex >= 0) {
-      this.alertChannels[existingIndex] = channel
-    } else {
-      channel.id = Date.now() // Simple ID generation
-      this.alertChannels.push(channel)
+      if (!index.includes(id)) {
+        index.push(id)
+        await fs.writeFile(indexPath, JSON.stringify(index, null, 2))
+      }
+    } catch (error) {
+      console.error(`Failed to update collection index for ${collection}:`, error)
     }
-    return channel
   }
 
-  async getAlertChannels(): Promise<AlertChannel[]> {
-    return [...this.alertChannels]
+  private async removeFromCollectionIndex(collection: string, id: string): Promise<void> {
+    try {
+      const indexPath = this.getCollectionPath(collection)
+      const content = await fs.readFile(indexPath, "utf-8")
+      const index: string[] = JSON.parse(content)
+
+      const filteredIndex = index.filter((item) => item !== id)
+      await fs.writeFile(indexPath, JSON.stringify(filteredIndex, null, 2))
+    } catch (error) {
+      console.error(`Failed to remove from collection index for ${collection}:`, error)
+    }
   }
 
-  async deleteAlertChannel(id: number): Promise<void> {
-    this.alertChannels = this.alertChannels.filter((c) => c.id !== id)
-  }
+  async cleanup(): Promise<void> {
+    const now = Date.now()
 
-  async saveConfig(key: string, value: any): Promise<void> {
-    this.config.set(key, value)
-  }
+    // Clean memory cache
+    for (const [key, item] of this.memoryCache.entries()) {
+      if (item.expires && now > item.expires) {
+        this.memoryCache.delete(key)
+      }
+    }
 
-  async getConfig(key: string): Promise<any> {
-    return this.config.get(key)
-  }
-}
+    // Clean files (this is more expensive, so we do it less frequently)
+    try {
+      const files = await fs.readdir(this.dataDir)
 
-// SQLite storage (file-based, no server needed)
-class SQLiteStorage implements StorageAdapter {
-  private db: any // Would use better-sqlite3 or similar
+      for (const file of files) {
+        if (file.endsWith(".json") && !file.endsWith("_index.json")) {
+          const filePath = path.join(this.dataDir, file)
+          try {
+            const content = await fs.readFile(filePath, "utf-8")
+            const item: StorageItem = JSON.parse(content)
 
-  constructor(dbPath = "./data/audit.db") {
-    // Initialize SQLite database
-    // this.db = new Database(dbPath)
-    // this.initTables()
-  }
+            if (item.expires && now > item.expires) {
+              await fs.unlink(filePath)
 
-  private initTables() {
-    // Create tables if they don't exist
-    const createTables = `
-      CREATE TABLE IF NOT EXISTS events (
-        id TEXT PRIMARY KEY,
-        type TEXT,
-        attributes TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE TABLE IF NOT EXISTS alert_rules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        rule_name TEXT,
-        action_pattern TEXT,
-        severity TEXT,
-        enabled BOOLEAN,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE TABLE IF NOT EXISTS alert_channels (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel_type TEXT,
-        channel_name TEXT,
-        configuration TEXT,
-        enabled BOOLEAN,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-      
-      CREATE TABLE IF NOT EXISTS config (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `
-    // this.db.exec(createTables)
-  }
-
-  async saveEvents(events: AuditEvent[]): Promise<void> {
-    // Implementation would insert events into SQLite
-    console.log("Saving events to SQLite:", events.length)
-  }
-
-  async getEvents(filters?: any): Promise<AuditEvent[]> {
-    // Implementation would query SQLite
-    return []
-  }
-
-  async saveAlertRule(rule: AlertRule): Promise<AlertRule> {
-    // Implementation would insert/update in SQLite
-    return rule
-  }
-
-  async getAlertRules(): Promise<AlertRule[]> {
-    return []
-  }
-
-  async deleteAlertRule(id: number): Promise<void> {
-    // Implementation would delete from SQLite
-  }
-
-  async saveAlertChannel(channel: AlertChannel): Promise<AlertChannel> {
-    return channel
-  }
-
-  async getAlertChannels(): Promise<AlertChannel[]> {
-    return []
-  }
-
-  async deleteAlertChannel(id: number): Promise<void> {
-    // Implementation would delete from SQLite
-  }
-
-  async saveConfig(key: string, value: any): Promise<void> {
-    // Implementation would insert/update config in SQLite
-  }
-
-  async getConfig(key: string): Promise<any> {
-    // Implementation would query config from SQLite
-    return null
-  }
-}
-
-// Factory function to create storage adapter
-export function createStorage(type: "memory" | "sqlite" | "postgres" = "memory"): StorageAdapter {
-  switch (type) {
-    case "sqlite":
-      return new SQLiteStorage()
-    case "memory":
-    default:
-      return new MemoryStorage()
+              // Extract collection and id from filename
+              const [collection, id] = file.replace(".json", "").split("_")
+              if (collection && id) {
+                await this.removeFromCollectionIndex(collection, id)
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to process file ${file}:`, error)
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to cleanup files:", error)
+    }
   }
 }
 
 // Global storage instance
-export const storage = createStorage((process.env.STORAGE_TYPE as "memory" | "sqlite" | "postgres") || "memory")
+export const storage = new SimpleStorage()
+
+// Helper functions for common storage patterns
+export const storageHelpers = {
+  // Store audit events
+  saveAuditEvent: async (event: any) => {
+    const id = `${event.id || Date.now()}`
+    await storage.save("audit_events", id, event)
+    return id
+  },
+
+  getAuditEvent: async (id: string) => {
+    return await storage.load("audit_events", id)
+  },
+
+  listAuditEvents: async () => {
+    return await storage.list("audit_events")
+  },
+
+  // Store configuration
+  saveConfig: async (key: string, value: any) => {
+    await storage.save("config", key, value)
+  },
+
+  getConfig: async (key: string) => {
+    return await storage.load("config", key)
+  },
+
+  // Store alert rules
+  saveAlertRule: async (rule: any) => {
+    const id = rule.id || `rule_${Date.now()}`
+    await storage.save("alert_rules", id, rule)
+    return id
+  },
+
+  getAlertRule: async (id: string) => {
+    return await storage.load("alert_rules", id)
+  },
+
+  listAlertRules: async () => {
+    return await storage.list("alert_rules")
+  },
+}
+
+// Start cleanup interval
+setInterval(
+  () => {
+    storage.cleanup()
+  },
+  10 * 60 * 1000,
+) // Every 10 minutes
