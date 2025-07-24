@@ -82,7 +82,7 @@ export const cacheHelpers = {
     cache.set(`api:${key}`, data, ttl)
   },
 
-  getCachedApiResponse: <T>(key: string): T | null => {\
+  getCachedApiResponse: <T>(key: string): T | null => {
     return cache.get<T>(`api:${key}`)
   },
 
@@ -91,7 +91,7 @@ export const cacheHelpers = {
     cache.set(`session:${sessionId}`, data, ttl)
   },
 
-  getSession: (sessionId: string): any | null => {\
+  getSession: (sessionId: string): any | null => {
     return cache.get(`session:${sessionId}`)
   },
 
@@ -100,7 +100,7 @@ export const cacheHelpers = {
     cache.set(`config:${key}`, value, ttl)
   },
 
-  getCachedConfig: (key: string): any | null => {\
+  getCachedConfig: (key: string): any | null => {
     return cache.get(`config:${key}`)
-  }\
+  }
 }
