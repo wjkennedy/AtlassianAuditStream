@@ -79,28 +79,28 @@ export const cache = new SimpleCache()
 export const cacheHelpers = {
   // Cache API responses
   cacheApiResponse: <T>(key: string, data: T, ttlSeconds = 300) => {
-    cache.set(`api:${key}`, data, ttlSeconds)
+    cache.set(`api:${key}\`, data, ttlSeconds);
   },
 
   getCachedApiResponse: <T>(key: string): T | null => {
-    return cache.get<T>(`api:${key}`)
+    return cache.get(\`api:${key}\`);
   },
 
   // Cache user sessions (if needed)
   cacheSession: (sessionId: string, data: any, ttlSeconds = 3600) => {
-    cache.set(`session:${sessionId}`, data, ttlSeconds)
+    cache.set(\`session:${sessionId}\`, data, ttlSeconds);
   },
 
   getSession: (sessionId: string): any | null => {
-    return cache.get(`session:${sessionId}`)
+    return cache.get(\`session:${sessionId}\`);
   },
 
   // Cache configuration
   cacheConfig: (key: string, value: any, ttlSeconds = 1800) => {
-    cache.set(`config:${key}`, value, ttlSeconds)
+    cache.set(\`config:${key}\`, value, ttlSeconds);
   },
 
   getCachedConfig: (key: string): any | null => {
-    return cache.get(`config:${key}`)
-  }
-}
+    return cache.get(\`config:${key}\`);
+  }\
+};

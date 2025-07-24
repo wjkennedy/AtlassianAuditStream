@@ -8,12 +8,21 @@ interface StorageItem {
   expires?: number
 }
 
+interface SimpleStorageData {
+  [key: string]: any
+}
+
 class SimpleStorage {
   private dataDir: string
   private memoryCache = new Map<string, StorageItem>()
+  private data: SimpleStorageData = {}
+  private filePath: string
+  private initialized: Promise<void>
 
   constructor(dataDir = process.env.FILE_STORAGE_PATH || "./data") {
     this.dataDir = dataDir
+    this.filePath = path.join(dataDir, "simple_storage.json")
+    this.initialized = this.load()
     this.ensureDataDir()
   }
 
@@ -23,6 +32,29 @@ class SimpleStorage {
     } catch (error) {
       console.error("Failed to create data directory:", error)
     }
+  }
+
+  private async load(): Promise<void> {
+    try {
+      const dir = path.dirname(this.filePath)
+      await fs.mkdir(dir, { recursive: true })
+      const fileContent = await fs.readFile(this.filePath, "utf-8")
+      this.data = JSON.parse(fileContent)
+    } catch (error: any) {
+      if (error.code === "ENOENT") {
+        // File does not exist, initialize with empty data and save it
+        this.data = {}
+        await this.save()
+      } else {
+        console.error("Failed to load simple storage:", error)
+        // Depending on your error handling strategy, you might want to rethrow or handle differently
+        throw error
+      }
+    }
+  }
+
+  private async save(): Promise<void> {
+    await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2), "utf-8")
   }
 
   private getFilePath(collection: string, id: string): string {
@@ -120,6 +152,7 @@ class SimpleStorage {
   }
 
   async clear(collection: string): Promise<void> {
+    await this.initialized
     const items = await this.list(collection)
 
     for (const id of items) {
@@ -207,6 +240,22 @@ class SimpleStorage {
     } catch (error) {
       console.error("Failed to cleanup files:", error)
     }
+  }
+
+  public async get<T>(key: string): Promise<T | undefined> {
+    await this.initialized // Ensure data is loaded before accessing
+    return this.data[key] as T
+  }
+
+  public async set<T>(key: string, value: T): Promise<void> {
+    await this.initialized // Ensure data is loaded before modifying
+    this.data[key] = value
+    await this.save()
+  }
+
+  public async getAll(): Promise<SimpleStorageData> {
+    await this.initialized
+    return { ...this.data } // Return a copy to prevent direct modification
   }
 }
 

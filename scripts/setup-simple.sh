@@ -214,6 +214,17 @@ EOF
 
 chmod +x scripts/restore.sh
 
+# Simple storage and cache environment setup
+echo "Setting up simple storage and cache environment..."
+
+# Create a directory for simple file storage if it doesn't exist
+# This is where simple_storage.json will be stored
+mkdir -p data
+
+echo "Simple storage directory 'data/' created/ensured."
+echo "Setup complete. You can now run your application using docker-compose.simple.yml"
+echo "Remember to set the FILE_STORAGE_PATH environment variable if running outside Docker."
+
 echo ""
 echo "🎉 Setup completed successfully!"
 echo ""

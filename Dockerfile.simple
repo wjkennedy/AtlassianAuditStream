@@ -1,28 +1,23 @@
-FROM node:18-alpine
+# Use the official Node.js 20 image as the base
+FROM node:20-alpine
 
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy package files
+# Copy package.json and package-lock.json (if any)
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install
 
-# Copy source code
+# Copy the rest of the application code
 COPY . .
 
-# Build the application
+# Build the Next.js application
 RUN npm run build
 
-# Create data directory
-RUN mkdir -p /app/data
-
-# Expose port
+# Expose the port Next.js runs on
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3000/api/health || exit 1
-
-# Start the application
+# Command to run the application
 CMD ["npm", "start"]
