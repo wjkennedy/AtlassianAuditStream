@@ -78,29 +78,29 @@ export const cache = new SimpleCache()
 // Helper functions for common caching patterns
 export const cacheHelpers = {
   // Cache API responses
-  cacheApiResponse: <T>(key: string, data: T, ttl: number = 300) => {
+  cacheApiResponse: function<T>(key: string, data: T, ttl: number = 300) {
     cache.set(`api:${key}`, data, ttl)
   },
 
-  getCachedApiResponse: <T>(key: string): T | null => {
+  getCachedApiResponse: function<T>(key: string): T | null {
     return cache.get<T>(`api:${key}`)
   },
 
   // Cache user sessions (if needed)
-  cacheSession: (sessionId: string, data: any, ttl: number = 3600) => {
+  cacheSession: function(sessionId: string, data: any, ttl: number = 3600) {
     cache.set(`session:${sessionId}`, data, ttl)
   },
 
-  getSession: (sessionId: string): any | null => {
+  getSession: function(sessionId: string): any | null {
     return cache.get(`session:${sessionId}`)
   },
 
   // Cache configuration
-  cacheConfig: (key: string, value: any, ttl: number = 1800) => {
+  cacheConfig: function(key: string, value: any, ttl: number = 1800) {
     cache.set(`config:${key}`, value, ttl)
   },
 
-  getCachedConfig: (key: string): any | null => {
+  getCachedConfig: function(key: string): any | null {
     return cache.get(`config:${key}`)
   }
 }
